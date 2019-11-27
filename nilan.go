@@ -1,4 +1,4 @@
-package controller
+package nilan
 
 // FanSpeed represents Nilan ventilation intensity value in range from 101 (lowest) to 104 (highest).
 type FanSpeed uint16

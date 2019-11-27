@@ -1,4 +1,4 @@
-package controller
+package nilan
 
 import "os"
 
