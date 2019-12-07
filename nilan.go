@@ -30,6 +30,8 @@ type Settings struct {
 	CentralHeatingPaused *bool
 	// CentralHeatingPauseDuration is duration of central heating pause (1-180)
 	CentralHeatingPauseDuration *int
+	// CentralHeatingIsOn is a power switch for central heating
+	CentralHeatingIsOn *bool
 	// VentilationMode is either 0 (Auto), 1 (Cooling) or 2 (Heating)
 	VentilationMode *int
 	// VentilationOnPause is used for stopping ventilation (emergency)

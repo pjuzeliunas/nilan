@@ -109,6 +109,8 @@ const (
 	CentralHeatingPauseRegister Register = 20600
 	// CentralHeatingPauseDurationRegister is ID of register holding central heating pause duration value
 	CentralHeatingPauseDurationRegister Register = 20601
+	// CentralHeatingPowerRegister is ID of register holding On/Off value of central heating
+	CentralHeatingPowerRegister Register = 20602
 	// VentilationModeRegister is ID of register holding ventilation mode value (0, 1 or 2).
 	VentilationModeRegister Register = 20120
 	// VentilationPauseRegister is ID of register holding ventilation pause flag
@@ -157,6 +159,7 @@ func (c *Controller) FetchSettings() Settings {
 	client4Registers := []Register{
 		CentralHeatingPauseRegister,
 		CentralHeatingPauseDurationRegister,
+		CentralHeatingPowerRegister,
 		supplyTemperatureRegister}
 
 	client1RegisterValues := c.FetchRegisterValues(1, client1Registers)
@@ -183,6 +186,9 @@ func (c *Controller) FetchSettings() Settings {
 	centralHeatingPauseDuration := new(int)
 	*centralHeatingPauseDuration = int(client4RegisterValues[CentralHeatingPauseDurationRegister])
 
+	centralHeatingOn := new(bool)
+	*centralHeatingOn = client4RegisterValues[CentralHeatingPowerRegister] == 1
+
 	ventilationMode := new(int)
 	*ventilationMode = int(client1RegisterValues[VentilationModeRegister])
 
@@ -199,6 +205,7 @@ func (c *Controller) FetchSettings() Settings {
 		DHWProductionPauseDuration:  dhwPauseDuration,
 		CentralHeatingPaused:        centralHeatingPaused,
 		CentralHeatingPauseDuration: centralHeatingPauseDuration,
+		CentralHeatingIsOn:          centralHeatingOn,
 		VentilationMode:             ventilationMode,
 		VentilationOnPause:          ventilationPause,
 		SetpointSupplyTemperature:   setpointTemperature}
