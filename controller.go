@@ -2,6 +2,7 @@ package nilan
 
 import (
 	"encoding/binary"
+	"errors"
 	"log"
 	"time"
 
@@ -30,15 +31,19 @@ func (c *Controller) getHandler(slaveID byte) *modbus.TCPClientHandler {
 }
 
 // FetchValue from register
-func (c *Controller) FetchValue(slaveID byte, register Register) uint16 {
+func (c *Controller) FetchValue(slaveID byte, register Register) (uint16, error) {
 	handler := c.getHandler(slaveID)
 	defer handler.Close()
 	client := modbus.NewClient(handler)
-	resultBytes, _ := client.ReadHoldingRegisters(uint16(register), 1)
-	if len(resultBytes) == 2 {
-		return binary.BigEndian.Uint16(resultBytes)
+	resultBytes, error := client.ReadHoldingRegisters(uint16(register), 1)
+	if error != nil {
+		return 0, error
 	}
-	panic("Cannot read register value")
+	if len(resultBytes) == 2 {
+		return binary.BigEndian.Uint16(resultBytes), nil
+	} else {
+		return 0, errors.New("cannot read register value")
+	}
 }
 
 // FetchRegisterValues from slave
@@ -61,14 +66,18 @@ func (c *Controller) FetchRegisterValues(slaveID byte, registers []Register) map
 }
 
 // SetRegisterValues on slave
-func (c *Controller) SetRegisterValues(slaveID byte, values map[Register]uint16) {
+func (c *Controller) SetRegisterValues(slaveID byte, values map[Register]uint16) error {
 	handler := c.getHandler(slaveID)
 	defer handler.Close()
 	client := modbus.NewClient(handler)
 
 	for register, value := range values {
-		client.WriteSingleRegister(uint16(register), value)
+		_, error := client.WriteSingleRegister(uint16(register), value)
+		if error != nil {
+			return error
+		}
 	}
+	return nil
 }
 
 // Register is address of register on client
@@ -133,20 +142,56 @@ const (
 	T18ReadingRegisterAIR9 Register = 20686
 )
 
-func (c *Controller) supplyFlowSetpointTemperatureRegister() Register {
+type DeviceType int
+
+const (
+	DeviceTypeAir9 DeviceType = 0
+	DeviceTypeGeo  DeviceType = 1
+)
+
+func (c *Controller) GetDeviceType() (DeviceType, error) {
+	geoRegValue, e1 := c.FetchValue(4, DeviceTypeGEOReigister)
+	if e1 != nil {
+		return 0, e1
+	}
+
+	air9RegValue, e2 := c.FetchValue(4, DeviceTypeAIR9Register)
+	if e2 != nil {
+		return 0, e2
+	}
+
 	switch {
-	case c.FetchValue(4, DeviceTypeGEOReigister) == 8:
-		return SetpointSupplyTemperatureRegisterGEO
-	case c.FetchValue(4, DeviceTypeAIR9Register) == 9:
-		return SetpointSupplyTemperatureRegisterAIR9
+	case geoRegValue == 8:
+		return DeviceTypeGeo, nil
+	case air9RegValue == 9:
+		return DeviceTypeAir9, nil
 	default:
-		panic("Cannot determine device type")
+		return 0, errors.New("cannot determine device type")
+	}
+}
+
+func (c *Controller) supplyFlowSetpointTemperatureRegister() (Register, error) {
+	deviceType, err := c.GetDeviceType()
+	if err != nil {
+		return 0, err
+	}
+
+	switch deviceType {
+	case DeviceTypeGeo:
+		return SetpointSupplyTemperatureRegisterGEO, nil
+	case DeviceTypeAir9:
+		return SetpointSupplyTemperatureRegisterAIR9, nil
+	default:
+		return 0, errors.New("cannot determine supply flow setpoint register")
 	}
 }
 
 // FetchSettings of Nilan
-func (c *Controller) FetchSettings() Settings {
-	supplyTemperatureRegister := c.supplyFlowSetpointTemperatureRegister()
+func (c *Controller) FetchSettings() (*Settings, error) {
+	supplyTemperatureRegister, e1 := c.supplyFlowSetpointTemperatureRegister()
+	if e1 != nil {
+		return nil, e1
+	}
 
 	client1Registers := []Register{
 		FanSpeedRegister,
@@ -198,7 +243,7 @@ func (c *Controller) FetchSettings() Settings {
 	setpointTemperature := new(int)
 	*setpointTemperature = int(client4RegisterValues[supplyTemperatureRegister])
 
-	settings := Settings{FanSpeed: fanSpeed,
+	settings := &Settings{FanSpeed: fanSpeed,
 		DesiredRoomTemperature:      desiredRoomTemperature,
 		DesiredDHWTemperature:       desiredDHWTemperature,
 		DHWProductionPaused:         dhwPaused,
@@ -210,13 +255,11 @@ func (c *Controller) FetchSettings() Settings {
 		VentilationOnPause:          ventilationPause,
 		SetpointSupplyTemperature:   setpointTemperature}
 
-	settingsStr := spew.Sprintf("%+v", settings)
-	log.Printf("Settings: %+v\n", settingsStr)
-	return settings
+	return settings, nil
 }
 
 // SendSettings of Nilan
-func (c *Controller) SendSettings(settings Settings) {
+func (c *Controller) SendSettings(settings Settings) error {
 	settingsStr := spew.Sprintf("%+v", settings)
 	log.Printf("Sending new settings to Nialn (<nil> values will be ignored): %+v\n", settingsStr)
 	client1RegisterValues := make(map[Register]uint16)
@@ -266,8 +309,7 @@ func (c *Controller) SendSettings(settings Settings) {
 	if settings.VentilationMode != nil {
 		ventilationMode := *settings.VentilationMode
 		if ventilationMode != 0 && ventilationMode != 1 && ventilationMode != 2 {
-			panic("Unsupported VentilationMode value")
-			// TODO: Think of validation pattern
+			return errors.New("unsupported VentilationMode value")
 		}
 		ventilationModeVal := uint16(ventilationMode)
 		client1RegisterValues[VentilationModeRegister] = ventilationModeVal
@@ -287,33 +329,58 @@ func (c *Controller) SendSettings(settings Settings) {
 		client4RegisterValues[SetpointSupplyTemperatureRegisterGEO] = setpointTempeature
 	}
 
-	c.SetRegisterValues(1, client1RegisterValues)
-	c.SetRegisterValues(4, client4RegisterValues)
+	e1 := c.SetRegisterValues(1, client1RegisterValues)
+	if e1 != nil {
+		return e1
+	}
+
+	e2 := c.SetRegisterValues(4, client4RegisterValues)
+	if e2 != nil {
+		return e2
+	}
+
+	return nil
 }
 
-func (c *Controller) roomTemperatureRegister() Register {
-	if c.FetchValue(1, MasterTemperatureSensorSettingRegister) == 0 {
-		return T3ExtractAirTemperatureRegister
+func (c *Controller) roomTemperatureRegister() (Register, error) {
+	masterSensorSetting, error := c.FetchValue(1, MasterTemperatureSensorSettingRegister)
+	if error != nil {
+		return 0, error
+	}
+	if masterSensorSetting == 0 {
+		return T3ExtractAirTemperatureRegister, nil
 	} else {
-		return TextRoomTemperatureRegister
+		return TextRoomTemperatureRegister, nil
 	}
 }
 
-func (c *Controller) t18ReadingRegister() Register {
-	switch {
-	case c.FetchValue(4, DeviceTypeGEOReigister) == 8:
-		return T18ReadingRegisterGEO
-	case c.FetchValue(4, DeviceTypeAIR9Register) == 9:
-		return T18ReadingRegisterAIR9
+func (c *Controller) t18ReadingRegister() (Register, error) {
+	deviceType, err := c.GetDeviceType()
+	if err != nil {
+		return 0, err
+	}
+
+	switch deviceType {
+	case DeviceTypeGeo:
+		return T18ReadingRegisterGEO, nil
+	case DeviceTypeAir9:
+		return T18ReadingRegisterAIR9, nil
 	default:
-		panic("Cannot determine device type")
+		return 0, errors.New("cannot determine T18 reading register")
 	}
 }
 
 // FetchReadings of Nilan sensors
-func (c *Controller) FetchReadings() Readings {
-	roomTemperatureRegister := c.roomTemperatureRegister()
-	t18Register := c.t18ReadingRegister()
+func (c *Controller) FetchReadings() (*Readings, error) {
+	roomTemperatureRegister, e1 := c.roomTemperatureRegister()
+	if e1 != nil {
+		return nil, e1
+	}
+
+	t18Register, e2 := c.t18ReadingRegister()
+	if e2 != nil {
+		return nil, e2
+	}
 
 	client1Registers := []Register{roomTemperatureRegister,
 		OutdoorTemperatureRegister,
@@ -335,7 +402,7 @@ func (c *Controller) FetchReadings() Readings {
 	dhwBottomTemperature := int(client1ReadingsRaw[DHWBottomTankTemperatureRegister])
 	supplyFlowTemperature := int(client4ReadingsRaw[t18Register])
 
-	readings := Readings{
+	readings := &Readings{
 		RoomTemperature:          roomTemperature,
 		OutdoorTemperature:       outdoorTemperature,
 		AverageHumidity:          averageHumidity,
@@ -343,6 +410,6 @@ func (c *Controller) FetchReadings() Readings {
 		DHWTankTopTemperature:    dhwTopTemperature,
 		DHWTankBottomTemperature: dhwBottomTemperature,
 		SupplyFlowTemperature:    supplyFlowTemperature}
-	log.Printf("Readings: %+v\n", readings)
-	return readings
+
+	return readings, nil
 }
