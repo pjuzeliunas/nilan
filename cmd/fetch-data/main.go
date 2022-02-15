@@ -14,7 +14,7 @@ func main() {
 		r, err := c.FetchReadings()
 		if err != nil {
 			fmt.Println(err)
-			return
+			continue
 		}
 		fmt.Println(r)
 
@@ -24,8 +24,7 @@ func main() {
 			return
 		}
 		fmt.Println(s)
+
 		time.Sleep(time.Second)
-
 	}
-
 }

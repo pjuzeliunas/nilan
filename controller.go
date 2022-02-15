@@ -3,6 +3,7 @@ package nilan
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -47,7 +48,7 @@ func (c *Controller) FetchValue(slaveID byte, register Register) (uint16, error)
 }
 
 // FetchRegisterValues from slave
-func (c *Controller) FetchRegisterValues(slaveID byte, registers []Register) map[Register]uint16 {
+func (c *Controller) FetchRegisterValues(slaveID byte, registers []Register) (map[Register]uint16, error) {
 	m := make(map[Register]uint16)
 
 	handler := c.getHandler(slaveID)
@@ -55,14 +56,19 @@ func (c *Controller) FetchRegisterValues(slaveID byte, registers []Register) map
 	client := modbus.NewClient(handler)
 
 	for _, register := range registers {
-		resultBytes, _ := client.ReadHoldingRegisters(uint16(register), 1)
+		resultBytes, err := client.ReadHoldingRegisters(uint16(register), 1)
+		if err != nil {
+			return m, err
+		}
 		if len(resultBytes) == 2 {
 			resultWord := binary.BigEndian.Uint16(resultBytes)
 			m[register] = resultWord
+		} else {
+			return m, errors.New("no result bytes")
 		}
 	}
 
-	return m
+	return m, nil
 }
 
 // SetRegisterValues on slave
@@ -207,8 +213,14 @@ func (c *Controller) FetchSettings() (*Settings, error) {
 		CentralHeatingPowerRegister,
 		supplyTemperatureRegister}
 
-	client1RegisterValues := c.FetchRegisterValues(1, client1Registers)
-	client4RegisterValues := c.FetchRegisterValues(4, client4Registers)
+	client1RegisterValues, e1 := c.FetchRegisterValues(1, client1Registers)
+	if e1 != nil {
+		return nil, e1
+	}
+	client4RegisterValues, e2 := c.FetchRegisterValues(4, client4Registers)
+	if e2 != nil {
+		return nil, e2
+	}
 
 	fanSpeed := new(FanSpeed)
 	*fanSpeed = FanSpeed(client1RegisterValues[FanSpeedRegister])
@@ -391,8 +403,14 @@ func (c *Controller) FetchReadings() (*Readings, error) {
 
 	client4Registers := []Register{t18Register}
 
-	client1ReadingsRaw := c.FetchRegisterValues(1, client1Registers)
-	client4ReadingsRaw := c.FetchRegisterValues(4, client4Registers)
+	client1ReadingsRaw, e1 := c.FetchRegisterValues(1, client1Registers)
+	if e1 != nil {
+		return nil, e1
+	}
+	client4ReadingsRaw, e2 := c.FetchRegisterValues(4, client4Registers)
+	if e2 != nil {
+		return nil, e2
+	}
 
 	roomTemperature := int(client1ReadingsRaw[roomTemperatureRegister])
 	outdoorTemperature := int(client1ReadingsRaw[OutdoorTemperatureRegister])
@@ -410,6 +428,10 @@ func (c *Controller) FetchReadings() (*Readings, error) {
 		DHWTankTopTemperature:    dhwTopTemperature,
 		DHWTankBottomTemperature: dhwBottomTemperature,
 		SupplyFlowTemperature:    supplyFlowTemperature}
+
+	if readings.AverageHumidity == 0 {
+		fmt.Println("what?")
+	}
 
 	return readings, nil
 }
