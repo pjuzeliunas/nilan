@@ -146,6 +146,24 @@ const (
 	// T18ReadingRegisterAIR9 is ID of register holding T18 supply flow temperature reading
 	// on AIR9 models
 	T18ReadingRegisterAIR9 Register = 20686
+	// EventOutdoorFilterWarningRegister is ID of register holding outdoor filter warning presence value
+	EventOutdoorFilterWarningRegister Register = 22507
+	// EventExtractFilterWarningRegister is ID of register holding extract filter warning presence value
+	EventExtractFilterWarningRegister Register = 22508
+	// EventHeaterOverHeatAlarmRegister is ID of register holding overheat alarm presence value
+	EventHeaterOverHeatAlarmRegister Register = 22512
+	// EventHeaterFrostWarningRegister is ID of register holding frost warning presence value
+	EventHeaterFrostWarningRegister Register = 22514
+	// EventHeaterFrostLongAlarmRegister is ID of register holding long frost alarm presence value
+	EventHeaterFrostLongAlarmRegister Register = 22515
+	// EventHeaterFrostAlarmRegister is ID of register holding frost alarm presence value
+	EventHeaterFrostAlarmRegister Register = 22516
+	// EventFireThermAlarmRegister is ID of register holding brandindgang activation status value
+	EventFireThermAlarmRegister Register = 22521
+	// EventKlixonWarningRegister is ID of register holding klixon warning presence value
+	EventKlixonWarningRegister Register = 22578
+	// EventCompressHighPressWarning is ID of register holding high presure warning presence value
+	EventCompressHighPressWarning Register = 22579
 )
 
 type DeviceType int
@@ -434,4 +452,42 @@ func (c *Controller) FetchReadings() (*Readings, error) {
 	}
 
 	return readings, nil
+}
+
+func (c *Controller) FetchErrors() (*Errors, error) {
+	registers := []Register{
+		EventOutdoorFilterWarningRegister,
+		EventExtractFilterWarningRegister,
+		EventHeaterOverHeatAlarmRegister,
+		EventHeaterFrostWarningRegister,
+		EventHeaterFrostLongAlarmRegister,
+		EventHeaterFrostAlarmRegister,
+		EventFireThermAlarmRegister,
+		EventKlixonWarningRegister,
+		EventCompressHighPressWarning,
+	}
+	readings, err := c.FetchRegisterValues(1, registers)
+	if err != nil {
+		return nil, err
+	}
+
+	outdoorFilterWarn := int(readings[EventOutdoorFilterWarningRegister]) == 1
+	extractFilterWarn := int(readings[EventExtractFilterWarningRegister]) == 1
+	heaterOverheatAlarm := int(readings[EventHeaterOverHeatAlarmRegister]) == 1
+	heaterFrostWarning := int(readings[EventHeaterFrostWarningRegister]) == 1
+	heaterLongFrostAlarm := int(readings[EventHeaterFrostLongAlarmRegister]) == 1
+	heaterFrostAlarm := int(readings[EventHeaterFrostAlarmRegister]) == 1
+	fireThermAlarm := int(readings[EventFireThermAlarmRegister]) == 1
+	klixonWarn := int(readings[EventKlixonWarningRegister]) == 1
+	highPressureWarn := int(readings[EventCompressHighPressWarning]) == 1
+
+	oldFilterWarning := outdoorFilterWarn || extractFilterWarn
+	otherErrors := heaterOverheatAlarm || heaterFrostWarning || heaterLongFrostAlarm || heaterFrostAlarm || fireThermAlarm || klixonWarn || highPressureWarn
+
+	errors := Errors{
+		OldFilterWarning: oldFilterWarning,
+		OtherErrors:      otherErrors,
+	}
+
+	return &errors, nil
 }
