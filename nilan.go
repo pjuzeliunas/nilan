@@ -57,3 +57,10 @@ type Readings struct {
 	// SupplyFlowTemperature in C times 10
 	SupplyFlowTemperature int
 }
+
+type Errors struct {
+	// Indicates a need of new filters
+	OldFilterWarning bool
+	// Indicates other problems that must to be checked
+	OtherErrors bool
+}
